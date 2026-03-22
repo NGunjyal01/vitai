@@ -10,13 +10,9 @@ app = FastAPI(title="VitaI API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://vitai-pi.vercel.app",
-    ],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=True,
 )
 
 @app.get("/health")
@@ -59,7 +55,7 @@ def get_report_status(report_id: str):
 
 @app.post("/api/chat")
 async def chat(request: dict):
-    from backend.services.gemini_ai_client import stream_chat
+    from services.ai_client import stream_chat
     from services.embeddings import get_embedding
     from db.queries import execute_query
 
