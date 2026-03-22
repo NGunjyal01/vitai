@@ -1,22 +1,16 @@
-import psycopg2
-import psycopg2.extras
-from dotenv import load_dotenv
-import os
+# db/queries.py
+from db.connection import get_conn, put_conn
 
-load_dotenv()
-
-def get_connection():
-    return psycopg2.connect(os.getenv('DATABASE_URL'))
-
-def execute_query(sql, params=None, fetch=True):
-    conn = get_connection()
+def execute_query(query, params=None):
+    conn = get_conn()
     try:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, params)
-            if fetch:
-                return cur.fetchall()
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            if cur.description:
+                result = cur.fetchall()
             else:
-                conn.commit()
-                return None
+                result = None
+            conn.commit()
+            return result
     finally:
-        conn.close()
+        put_conn(conn)

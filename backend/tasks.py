@@ -1,6 +1,6 @@
 from celery_app import celery
 from services.pdf_extractor import extract_text
-from services.ai_client import parse_lab_report
+from backend.services.gemini_ai_client import parse_lab_report
 from services.embeddings import get_embedding
 from db.queries import execute_query
 from datetime import datetime

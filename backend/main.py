@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import os, uuid, shutil, json, tempfile
+import time
 
 load_dotenv()
 
@@ -98,6 +99,7 @@ async def chat(request: dict):
 async def get_score(user_id: str):
     from db.queries import execute_query
 
+    start = time.time()
     rows = execute_query("""
         SELECT hm.parameter_name, hm.value, hm.normal_range_low,
             hm.normal_range_high, hm.status
@@ -112,7 +114,7 @@ async def get_score(user_id: str):
         AND hm.recorded_at = latest.max_time
         WHERE hm.user_id = %s
     """, (user_id, user_id))
-
+    print("DB TIME:", time.time() - start)
     if not rows:
         return {"score": None, "message": "No data yet — upload a report first"}
 
