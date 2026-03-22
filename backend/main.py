@@ -95,17 +95,23 @@ async def chat(request: dict):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 @app.get("/api/score/{user_id}")
-def get_score(user_id: str):
+async def get_score(user_id: str):
     from db.queries import execute_query
 
     rows = execute_query("""
-        SELECT DISTINCT ON (parameter_name)
-            parameter_name, value, normal_range_low,
-            normal_range_high, status
-        FROM health_metrics
-        WHERE user_id = %s
-        ORDER BY parameter_name, recorded_at DESC
-    """, (user_id,))
+        SELECT hm.parameter_name, hm.value, hm.normal_range_low,
+            hm.normal_range_high, hm.status
+        FROM health_metrics hm
+        JOIN (
+            SELECT parameter_name, MAX(recorded_at) as max_time
+            FROM health_metrics
+            WHERE user_id = %s
+            GROUP BY parameter_name
+        ) latest
+        ON hm.parameter_name = latest.parameter_name
+        AND hm.recorded_at = latest.max_time
+        WHERE hm.user_id = %s
+    """, (user_id, user_id))
 
     if not rows:
         return {"score": None, "message": "No data yet — upload a report first"}
