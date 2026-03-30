@@ -72,7 +72,7 @@ export default function CoachPage() {
         });
 
         if (!response.ok) {
-          throw new Error("Failed to get response");
+          throw new Error(`${response.status} - Failed to get response`);
         }
 
         const reader = response.body?.getReader();
@@ -125,13 +125,16 @@ export default function CoachPage() {
           };
           return updated;
         });
-      } catch {
+      } catch (err: any) {
+        const isRateLimit = err?.message?.includes("429") || err?.message?.includes("rate");
         setMessages((prev) => {
           const updated = [...prev];
           const lastIdx = updated.length - 1;
           updated[lastIdx] = {
             role: "assistant",
-            content: "Sorry, I had trouble responding. Please try again.",
+            content: isRateLimit
+              ? "The AI service is currently rate-limited. Please wait 30 seconds and try again. This happens on free API tiers."
+              : "Sorry, I had trouble responding. Please try again.",
             isStreaming: false,
           };
           return updated;

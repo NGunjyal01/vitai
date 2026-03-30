@@ -106,7 +106,14 @@ export default function ReportsPage() {
         {/* Upload area */}
         {showUpload && userId && (
           <div className="mb-6">
-            <ReportUpload userId={userId} onComplete={handleUploadComplete} />
+            <ReportUpload
+              userId={userId}
+              onComplete={handleUploadComplete}
+              onCancel={() => {
+                setShowUpload(false);
+                if (userId) fetchReports(userId);
+              }}
+            />
           </div>
         )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { apiUpload, apiFetch } from "@/lib/api";
 import { useInvalidate } from "@/lib/hooks";
@@ -8,6 +8,7 @@ import { useInvalidate } from "@/lib/hooks";
 interface ReportUploadProps {
   userId: string;
   onComplete: (reportId: string) => void;
+  onCancel?: () => void;
 }
 
 interface ProcessingStep {
@@ -15,12 +16,14 @@ interface ProcessingStep {
   status: "pending" | "active" | "done" | "error";
 }
 
-export default function ReportUpload({ userId, onComplete }: ReportUploadProps) {
+export default function ReportUpload({ userId, onComplete, onCancel }: ReportUploadProps) {
   const invalidate = useInvalidate();
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [steps, setSteps] = useState<ProcessingStep[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
+  const currentReportId = useRef<string | null>(null);
+  const cancelledRef = useRef(false);
 
   const updateStep = (index: number, status: ProcessingStep["status"]) => {
     setSteps((prev) =>
@@ -28,13 +31,43 @@ export default function ReportUpload({ userId, onComplete }: ReportUploadProps) 
     );
   };
 
+  const resetState = () => {
+    setUploading(false);
+    setError(null);
+    setSteps([]);
+    setFileName(null);
+    currentReportId.current = null;
+    cancelledRef.current = false;
+  };
+
+  const handleCancel = async () => {
+    cancelledRef.current = true;
+
+    // Delete the report from DB if one was created
+    if (currentReportId.current) {
+      try {
+        await apiFetch(`/api/reports/${currentReportId.current}`, { method: "DELETE" });
+        invalidate(["reports"]);
+      } catch {
+        // Ignore delete errors
+      }
+    }
+
+    resetState();
+    onCancel?.();
+  };
+
   const pollReport = useCallback(
     async (reportId: string) => {
       const poll = async () => {
+        if (cancelledRef.current) return;
+
         try {
-          const report = await apiFetch<{ status: string }>(
+          const report = await apiFetch<{ status: string; error_message?: string }>(
             `/api/reports/${reportId}`
           );
+
+          if (cancelledRef.current) return;
 
           if (report.status === "text_extracted") {
             updateStep(1, "done");
@@ -60,15 +93,23 @@ export default function ReportUpload({ userId, onComplete }: ReportUploadProps) 
               steps.findIndex((s) => s.status === "active"),
               "error"
             );
-            setError("Processing failed. Please try again.");
+            const errorMsg = report.error_message || "";
+            const isRateLimit = errorMsg.includes("429") || errorMsg.includes("Too Many Requests") || errorMsg.includes("rate");
+            setError(
+              isRateLimit
+                ? "AI service is rate-limited. Please wait 1-2 minutes and try uploading again."
+                : "Processing failed. Please try again."
+            );
             setUploading(false);
             return;
           }
 
           setTimeout(poll, 3000);
         } catch {
-          setError("Error checking report status.");
-          setUploading(false);
+          if (!cancelledRef.current) {
+            setError("Error checking report status.");
+            setUploading(false);
+          }
         }
       };
 
@@ -85,6 +126,7 @@ export default function ReportUpload({ userId, onComplete }: ReportUploadProps) 
       setError(null);
       setFileName(file.name);
       setUploading(true);
+      cancelledRef.current = false;
 
       const initialSteps: ProcessingStep[] = [
         { label: "File received", status: "active" },
@@ -103,16 +145,25 @@ export default function ReportUpload({ userId, onComplete }: ReportUploadProps) 
           formData
         );
 
+        currentReportId.current = result.report_id;
+
+        if (cancelledRef.current) {
+          // User cancelled during upload — clean up
+          await apiFetch(`/api/reports/${result.report_id}`, { method: "DELETE" }).catch(() => {});
+          return;
+        }
+
         updateStep(0, "done");
         updateStep(1, "active");
 
         pollReport(result.report_id);
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Upload failed";
-        setError(message);
-        setUploading(false);
-        updateStep(0, "error");
+        if (!cancelledRef.current) {
+          const message = err instanceof Error ? err.message : "Upload failed";
+          setError(message);
+          setUploading(false);
+          updateStep(0, "error");
+        }
       }
     },
     [userId, pollReport]
@@ -161,9 +212,19 @@ export default function ReportUpload({ userId, onComplete }: ReportUploadProps) 
       {steps.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
           {fileName && (
-            <p className="text-sm text-gray-500 mb-4 truncate">
-              Uploading: <span className="font-medium text-gray-700">{fileName}</span>
-            </p>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm text-gray-500 truncate">
+                Uploading: <span className="font-medium text-gray-700">{fileName}</span>
+              </p>
+              {uploading && (
+                <button
+                  onClick={handleCancel}
+                  className="text-xs font-medium text-red-500 hover:text-red-700 transition"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           )}
           <div className="space-y-3">
             {steps.map((step, i) => (
@@ -210,6 +271,16 @@ export default function ReportUpload({ userId, onComplete }: ReportUploadProps) 
               </div>
             ))}
           </div>
+
+          {/* Retry button on failure */}
+          {error && !uploading && (
+            <button
+              onClick={resetState}
+              className="mt-4 text-sm font-medium text-emerald-600 hover:text-emerald-700 transition"
+            >
+              Try again
+            </button>
+          )}
         </div>
       )}
 

@@ -161,7 +161,49 @@ export default function ReportDetailPage() {
         </div>
 
         {/* Metrics grid */}
-        {report.metrics && report.metrics.length > 0 ? (
+        {/* Failed state */}
+        {report.status === "failed" && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+            <p className="text-red-700 font-medium mb-2">Report processing failed</p>
+            <p className="text-red-600 text-sm mb-4">
+              {(report as any).error_message?.includes("429")
+                ? "The AI service was rate-limited. Please try uploading again in 1-2 minutes."
+                : (report as any).error_message || "An error occurred while processing this report."}
+            </p>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => router.push("/reports")}
+                className="text-sm font-medium text-gray-600 hover:text-gray-800 transition"
+              >
+                Back to Reports
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await apiFetch(`/api/reports/${reportId}`, { method: "DELETE" });
+                    router.push("/reports");
+                  } catch {
+                    router.push("/reports");
+                  }
+                }}
+                className="text-sm font-medium text-red-600 hover:text-red-800 transition"
+              >
+                Delete this report
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Processing state */}
+        {report.status === "processing" && (
+          <div className="text-center py-10 text-gray-500 text-sm">
+            <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            Report is still being processed...
+          </div>
+        )}
+
+        {/* Metrics grid */}
+        {report.status === "processed" && report.metrics && report.metrics.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {report.metrics.map((metric, i) => (
               <MetricCard
@@ -176,13 +218,11 @@ export default function ReportDetailPage() {
               />
             ))}
           </div>
-        ) : (
+        ) : report.status === "processed" ? (
           <div className="text-center py-10 text-gray-500 text-sm">
-            {report.status === "processed"
-              ? "No metrics found in this report."
-              : "Report is still being processed..."}
+            No metrics found in this report.
           </div>
-        )}
+        ) : null}
       </div>
     </AppShell>
   );

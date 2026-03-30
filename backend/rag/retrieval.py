@@ -70,8 +70,10 @@ def hybrid_retrieve(
     try:
         all_texts = get_all_metric_texts(user_id)
         if all_texts:
-            corpus_ids = [str(t["id"]) for t in all_texts]
-            corpus_texts = [t["display_text"] for t in all_texts]
+            # Filter out entries with None display_text
+            valid_texts = [t for t in all_texts if t.get("display_text")]
+            corpus_ids = [str(t["id"]) for t in valid_texts]
+            corpus_texts = [t["display_text"] for t in valid_texts]
             tokenized_corpus = [text.lower().split() for text in corpus_texts]
             tokenized_query = query.lower().split()
 

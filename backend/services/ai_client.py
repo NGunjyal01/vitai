@@ -60,11 +60,18 @@ async def _groq_generate(
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(GROQ_API_URL, json=payload, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+    import asyncio as _aio
+    for attempt in range(3):
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(GROQ_API_URL, json=payload, headers=headers)
+            if response.status_code == 429 and attempt < 2:
+                wait = (attempt + 1) * 5  # 5s, 10s
+                logger.warning("Groq 429, retrying in %ds (attempt %d/3)", wait, attempt + 1)
+                await _aio.sleep(wait)
+                continue
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
 
 
 async def _groq_generate_stream(
@@ -92,23 +99,27 @@ async def _groq_generate_stream(
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        async with client.stream("POST", GROQ_API_URL, json=payload, headers=headers) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line or not line.startswith("data: "):
-                    continue
-                data_str = line[len("data: "):]
-                if data_str.strip() == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data_str)
-                    delta = chunk["choices"][0].get("delta", {})
-                    content = delta.get("content")
-                    if content:
-                        yield content
-                except Exception:
-                    continue
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream("POST", GROQ_API_URL, json=payload, headers=headers) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[len("data: "):]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk["choices"][0].get("delta", {})
+                        content = delta.get("content")
+                        if content:
+                            yield content
+                    except Exception:
+                        continue
+    except httpx.HTTPStatusError as e:
+        logger.warning("Groq streaming failed (%s)", e)
+        yield "I'm currently experiencing high demand. Please try again in a moment."
 
 
 # ---------------------------------------------------------------------------

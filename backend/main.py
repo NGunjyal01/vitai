@@ -212,6 +212,22 @@ async def get_report_detail(report_id: str):
     return {**report, "metrics": metrics}
 
 
+@app.delete("/api/reports/{report_id}")
+async def delete_report(report_id: str):
+    """Delete a report and its associated health metrics."""
+    from db.queries import get_conn
+    import psycopg2.extras
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM health_metrics WHERE report_id = %s", (report_id,))
+                cur.execute("DELETE FROM insights WHERE triggered_by_report_id = %s", (report_id,))
+                cur.execute("DELETE FROM reports WHERE id = %s", (report_id,))
+        return {"success": True}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.get("/api/score")
 async def get_health_score(user_id: str = Query(...)):
     score = calculate_health_score(user_id)
