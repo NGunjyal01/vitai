@@ -1,77 +1,219 @@
-from groq import Groq
-import json, re, os
-from dotenv import load_dotenv
+"""
+AI client module — Groq (primary) with Gemini (optional, if billing enabled).
+"""
 
-load_dotenv()
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+import json
+import logging
+from typing import AsyncGenerator
 
-INTAKE_SYSTEM_PROMPT = """You are a medical data extraction system. Extract all lab parameters from the report text.
-Return ONLY valid JSON, no other text, no markdown fences.
-{
-  "report_type": "CBC|Lipid Panel|Thyroid|Diabetes|Kidney|Liver|Other",
-  "report_date": "YYYY-MM-DD or null",
-  "source_lab": "lab name or null",
-  "parameters": [
-    {
-      "name": "Full parameter name",
-      "abbreviation": "abbreviation or null",
-      "value": 0.0,
-      "unit": "unit string",
-      "normal_range_low": 0.0,
-      "normal_range_high": 0.0,
-      "status": "normal|low|high|borderline_low|borderline_high",
-      "percent_of_range": 75
-    }
-  ]
-}"""
+import httpx
 
-COACH_SYSTEM_PROMPT = """You are an AI health coach with access to a user's lab results.
-Explain health data in plain English and give actionable advice.
-Rules:
-- Never diagnose. Say "your values suggest" not "you have".
-- Always reference specific values from the context.
-- Be warm and encouraging, not clinical.
-- If data is missing, say so clearly."""
+from config import GEMINI_API_KEY, GROQ_API_KEY
 
-def repair_json(raw: str) -> dict:
-    cleaned = raw.strip().replace("```json", "").replace("```", "").strip()
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Gemini client (optional — only if API key is set and billing enabled)
+# ---------------------------------------------------------------------------
+gemini_client = None
+GEMINI_MODEL = "gemini-2.0-flash"
+
+if GEMINI_API_KEY:
     try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        raise ValueError(f"Could not parse JSON from response: {raw[:300]}")
+        from google import genai
+        from google.genai import types as genai_types
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    except Exception:
+        logger.info("Gemini SDK not available, using Groq only.")
 
-def parse_lab_report(text: str) -> dict:
-    # Truncate to avoid token limits
-    truncated = text[:8000] if len(text) > 8000 else text
-    
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": INTAKE_SYSTEM_PROMPT},
-            {"role": "user", "content": f"Extract all lab parameters from this report:\n\n{truncated}"}
-        ],
-        temperature=0.1,
-        max_tokens=8000
-    )
-    raw = response.choices[0].message.content
-    print("Groq raw response preview:", raw[:300])
-    return repair_json(raw)
+GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-def stream_chat(context: str, message: str):
-    stream = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": COACH_SYSTEM_PROMPT},
-            {"role": "user", "content": f"{context}\n\nUser question: {message}"}
-        ],
-        temperature=0.7,
-        max_tokens=1000,
-        stream=True
+
+# ---------------------------------------------------------------------------
+# Groq (primary)
+# ---------------------------------------------------------------------------
+async def _groq_generate(
+    prompt: str,
+    system: str | None = None,
+    json_mode: bool = False,
+    max_tokens: int = 4096,
+    temperature: float = 0.7,
+) -> str:
+    """Generate a completion using the Groq API."""
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    payload: dict = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(GROQ_API_URL, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+
+
+async def _groq_generate_stream(
+    prompt: str,
+    system: str | None = None,
+    max_tokens: int = 4096,
+    temperature: float = 0.7,
+) -> AsyncGenerator[str, None]:
+    """Stream a completion from the Groq API."""
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    payload: dict = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": True,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        async with client.stream("POST", GROQ_API_URL, json=payload, headers=headers) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+                data_str = line[len("data: "):]
+                if data_str.strip() == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                    delta = chunk["choices"][0].get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        yield content
+                except Exception:
+                    continue
+
+
+# ---------------------------------------------------------------------------
+# Gemini generation (only if client is available)
+# ---------------------------------------------------------------------------
+def _gemini_generate(
+    prompt: str,
+    system: str | None = None,
+    json_mode: bool = False,
+    max_tokens: int = 4096,
+    temperature: float = 0.7,
+    search_grounding: bool = False,
+) -> str | None:
+    """Try Gemini, return None on failure."""
+    if not gemini_client:
+        return None
+    try:
+        config = genai_types.GenerateContentConfig(
+            max_output_tokens=max_tokens,
+            temperature=temperature,
+        )
+        if system:
+            config.system_instruction = system
+        if json_mode:
+            config.response_mime_type = "application/json"
+        if search_grounding:
+            config.tools = [genai_types.Tool(google_search=genai_types.GoogleSearch())]
+
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=config,
+        )
+        return response.text
+    except Exception as exc:
+        logger.warning("Gemini failed (%s), falling back to Groq.", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+async def ai_generate(
+    prompt: str,
+    system: str | None = None,
+    json_mode: bool = False,
+    max_tokens: int = 4096,
+    temperature: float = 0.7,
+    search_grounding: bool = False,
+) -> str:
+    """
+    Generate a completion. Tries Gemini first (if available), falls back to Groq.
+    """
+    # Try Gemini if available
+    if gemini_client and not search_grounding:
+        result = _gemini_generate(prompt, system, json_mode, max_tokens, temperature, search_grounding)
+        if result:
+            return result
+
+    # Primary: Groq
+    return await _groq_generate(
+        prompt=prompt,
+        system=system,
+        json_mode=json_mode,
+        max_tokens=max_tokens,
+        temperature=temperature,
     )
-    for chunk in stream:
-        text = chunk.choices[0].delta.content
-        if text:
-            yield text
+
+
+async def ai_generate_stream(
+    prompt: str,
+    system: str | None = None,
+    max_tokens: int = 4096,
+    temperature: float = 0.7,
+) -> AsyncGenerator[str, None]:
+    """
+    Stream a completion. Tries Gemini first (if available), falls back to Groq.
+    """
+    # Try Gemini streaming if available
+    if gemini_client:
+        try:
+            config = genai_types.GenerateContentConfig(
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+            )
+            if system:
+                config.system_instruction = system
+
+            stream = gemini_client.models.generate_content_stream(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=config,
+            )
+            for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+            return
+        except Exception as exc:
+            logger.warning("Gemini streaming failed (%s), falling back to Groq.", exc)
+
+    # Primary: Groq streaming
+    async for text in _groq_generate_stream(
+        prompt=prompt,
+        system=system,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    ):
+        yield text

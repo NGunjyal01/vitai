@@ -19,3 +19,7 @@ frontend/.next/
 .DS_Store
 *.db
 uploads/
+
+backend_old
+frontend_old
+schema.sql
