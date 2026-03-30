@@ -1,5 +1,8 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// ---------------------------------------------------------------------------
+// Core fetch (caching handled by React Query)
+// ---------------------------------------------------------------------------
 export async function apiFetch<T = any>(
   path: string,
   options: RequestInit = {}
@@ -18,6 +21,9 @@ export async function apiFetch<T = any>(
   return res.json();
 }
 
+// ---------------------------------------------------------------------------
+// File upload (no caching)
+// ---------------------------------------------------------------------------
 export async function apiUpload<T = any>(
   path: string,
   formData: FormData
@@ -33,6 +39,9 @@ export async function apiUpload<T = any>(
   return res.json();
 }
 
+// ---------------------------------------------------------------------------
+// Stream URL helper
+// ---------------------------------------------------------------------------
 export function apiStreamUrl(path: string): string {
   return `${API_URL}${path}`;
 }

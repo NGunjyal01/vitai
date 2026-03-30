@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { apiUpload, apiFetch } from "@/lib/api";
+import { useInvalidate } from "@/lib/hooks";
 
 interface ReportUploadProps {
   userId: string;
@@ -15,6 +16,7 @@ interface ProcessingStep {
 }
 
 export default function ReportUpload({ userId, onComplete }: ReportUploadProps) {
+  const invalidate = useInvalidate();
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [steps, setSteps] = useState<ProcessingStep[]>([]);
@@ -48,6 +50,7 @@ export default function ReportUpload({ userId, onComplete }: ReportUploadProps) 
             updateStep(2, "done");
             updateStep(3, "done");
             setUploading(false);
+            invalidate(["reports", "score"]);
             onComplete(reportId);
             return;
           }

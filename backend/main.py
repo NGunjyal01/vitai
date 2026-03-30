@@ -33,12 +33,18 @@ from db.queries import (
     complete_plan_item,
     save_symptom_log,
     get_symptom_logs,
+    get_user_context_summary,
+    save_agent_trace,
 )
 from services.pdf_extract import extract_text
 from agents.intake import parse_report
+from agents.planner import plan_query
+from agents.analysis import run_analysis
 from rag.embeddings import get_embedding
+from rag.retrieval import hybrid_retrieve, compress_context
 from scoring.health_score import calculate_health_score
 from services.ai_client import ai_generate, ai_generate_stream
+from services.medical_knowledge import get_medical_context
 from services.parameter_registry import (
     normalize_parameter_name,
     get_normal_range,
@@ -136,6 +142,14 @@ def process_report(report_id: str, user_id: str, file_path: str) -> None:
             source_lab=result.get("source_lab"),
             raw_text=extracted_text,
         )
+
+        # 5. Run analysis agent for cross-report insights
+        try:
+            import asyncio as _asyncio
+            _asyncio.run(run_analysis(user_id, report_id))
+        except Exception:
+            pass  # Don't fail report processing if analysis fails
+
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -210,33 +224,50 @@ async def chat(request: Request):
     message = body["message"]
     user_id = body["user_id"]
 
-    # Gather context
-    user_profile = get_user_profile(user_id)
-    latest_metrics = get_latest_metrics(user_id)
+    # 1. Save user message to chat history
+    save_chat_message(user_id, "user", message)
 
-    # Build context string from metrics
-    context_lines = []
-    for m in latest_metrics:
-        line = (
-            f"- {m.get('parameter_name', 'N/A')}: {m.get('value', 'N/A')} {m.get('unit', '')} "
-            f"(ref: {m.get('normal_range_low', '?')}-{m.get('normal_range_high', '?')}, "
-            f"status: {m.get('status', 'unknown')})"
-        )
-        context_lines.append(line)
-    context_str = "\n".join(context_lines) if context_lines else "No lab data available yet."
+    # 2. Get user context summary (profile + key metrics)
+    user_context = get_user_context_summary(user_id)
+    user_profile = user_context.get("profile") or {}
 
-    # Build full prompt
+    # 3. Planner agent — decides intent, priority markers, etc.
+    plan = await plan_query(message, user_context)
+
+    # 4. Hybrid RAG retrieve (semantic + keyword)
+    records = hybrid_retrieve(user_id, message, plan, top_k=10)
+
+    # 5. Compress retrieved records into a concise context string
+    context_str = compress_context(records)
+
+    # 6. Medical knowledge for priority markers
+    medical_ctx = get_medical_context(
+        plan.get("priority_markers", []), user_profile
+    )
+
+    # 7. Chat history (last 5 messages for conversational continuity)
+    chat_history = get_chat_history(user_id, limit=5)
+    history_lines = []
+    for msg in reversed(chat_history):  # oldest first
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        history_lines.append(f"{role.upper()}: {content}")
+    history_str = "\n".join(history_lines) if history_lines else "(no prior conversation)"
+
+    # 8. Build full Coach prompt
+    profile_summary = json.dumps(user_profile, default=str) if user_profile else "No profile data."
     full_prompt = (
         f"{COACH_SYSTEM_PROMPT}\n\n"
-        f"### User Profile\n{json.dumps(user_profile, default=str) if user_profile else 'No profile data.'}\n\n"
-        f"### Latest Lab Results\n{context_str}\n\n"
+        f"### User Profile\n{profile_summary}\n\n"
+        f"### Lab Results (RAG Context)\n{context_str}\n\n"
+        f"### Medical Knowledge\n{medical_ctx}\n\n"
+        f"### Recent Conversation\n{history_str}\n\n"
         f"### User Message\n{message}"
     )
 
-    # Save user message to chat history
-    save_chat_message(user_id, "user", message)
+    # 9-11. Stream response via SSE, apply guardrails, persist
+    trace_start = asyncio.get_event_loop().time()
 
-    # Stream the response via SSE
     async def event_generator():
         full_response = []
         async for chunk in ai_generate_stream(full_prompt):
@@ -244,9 +275,26 @@ async def chat(request: Request):
             full_response.append(sanitized)
             yield f"data: {json.dumps({'text': sanitized})}\n\n"
 
-        # After streaming completes, persist the assistant response
+        # After stream completes: save assistant response
         complete_text = "".join(full_response)
         save_chat_message(user_id, "assistant", complete_text)
+
+        # Save agent trace for observability
+        latency_ms = int((asyncio.get_event_loop().time() - trace_start) * 1000)
+        try:
+            save_agent_trace(
+                user_id=user_id,
+                agent_name="coach_chat",
+                output_data={
+                    "plan": plan,
+                    "rag_records": len(records),
+                    "response_length": len(complete_text),
+                },
+                latency_ms=latency_ms,
+                input_data={"message": message},
+            )
+        except Exception:
+            pass  # Don't fail the response if trace saving fails
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -486,7 +534,8 @@ async def create_symptom_log(request: Request):
     if not user_id:
         return JSONResponse(status_code=400, content={"error": "user_id is required"})
 
-    save_symptom_log(user_id, energy_level, str(mood), symptoms, notes)
+    logged_date = body.get("logged_date")
+    save_symptom_log(user_id, energy_level, str(mood), symptoms, notes, logged_date)
     return {"success": True}
 
 

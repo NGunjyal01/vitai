@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { Plus, ChevronDown, ChevronUp, CheckCircle2, Circle, Upload } from "lucide-react";
 import AppShell from "@/components/AppShell";
@@ -8,16 +8,8 @@ import HealthScore from "@/components/HealthScore";
 import InsightBanner from "@/components/InsightBanner";
 import JourneyProgress from "@/components/JourneyProgress";
 import PrivacyBanner from "@/components/PrivacyBanner";
-import { supabase } from "@/lib/supabase";
-import { apiFetch } from "@/lib/api";
+import { useUserId, useScore, useInsights, useReports, useProfile } from "@/lib/hooks";
 import { formatDate, cn } from "@/lib/utils";
-
-interface ScoreData {
-  total_score: number;
-  grade: string;
-  categories_assessed: number;
-  total_categories?: number;
-}
 
 interface Insight {
   id: string;
@@ -41,99 +33,40 @@ interface ActionItem {
   completed: boolean;
 }
 
-const journeyStepsDefault = [
-  { label: "Onboarded", completed: false },
-  { label: "First Report", completed: false },
-  { label: "First Insights", completed: false },
-  { label: "7-Day Streak", completed: false },
-  { label: "Plan Created", completed: false },
-];
-
 export default function DashboardPage() {
-  const [userId, setUserId] = useState<string | null>(null);
-  const [scoreData, setScoreData] = useState<ScoreData | null>(null);
-  const [insights, setInsights] = useState<Insight[]>([]);
-  const [reports, setReports] = useState<Report[]>([]);
-  const [todayAction, setTodayAction] = useState<ActionItem | null>(null);
+  const userId = useUserId();
+  const { data: scoreData, isLoading: scoreLoading } = useScore(userId);
+  const { data: insightsRaw, isLoading: insightsLoading } = useInsights(userId);
+  const { data: reportsRaw, isLoading: reportsLoading } = useReports(userId);
+  const { data: profile } = useProfile(userId);
+
+  const [todayAction] = useState<ActionItem | null>(null);
   const [actionDone, setActionDone] = useState(false);
   const [insightsExpanded, setInsightsExpanded] = useState(false);
-  const [journeySteps, setJourneySteps] = useState(journeyStepsDefault);
-  const [loading, setLoading] = useState(true);
 
-  // Get user ID
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) {
-        setUserId(data.user.id);
-      }
-    });
-  }, []);
+  const loading = scoreLoading || insightsLoading || reportsLoading;
 
-  // Fetch data when userId is available
-  useEffect(() => {
-    if (!userId) return;
+  // Normalise data with fallbacks
+  const insights: Insight[] = Array.isArray(insightsRaw)
+    ? insightsRaw
+    : [
+        {
+          id: "placeholder-1",
+          title: "Insights coming soon",
+          body: "Upload a health report to get personalized insights powered by AI.",
+          severity: "info" as const,
+        },
+      ];
+  const reports: Report[] = Array.isArray(reportsRaw) ? reportsRaw : [];
 
-    async function fetchData() {
-      setLoading(true);
-
-      // Fetch all data in parallel, handle failures gracefully
-      const [scoreRes, insightsRes, reportsRes, profileRes] = await Promise.allSettled([
-        apiFetch<ScoreData>(`/api/score?user_id=${userId}`),
-        apiFetch<Insight[]>(`/api/insights?user_id=${userId}`),
-        apiFetch<Report[]>(`/api/reports?user_id=${userId}`),
-        apiFetch<{ onboarding_completed?: boolean }>(`/api/profile?user_id=${userId}`),
-      ]);
-
-      if (scoreRes.status === "fulfilled") {
-        setScoreData(scoreRes.value);
-      }
-
-      if (insightsRes.status === "fulfilled" && Array.isArray(insightsRes.value)) {
-        setInsights(insightsRes.value);
-      } else {
-        // Placeholder insights when endpoint is not ready
-        setInsights([
-          {
-            id: "placeholder-1",
-            title: "Insights coming soon",
-            body: "Upload a health report to get personalized insights powered by AI.",
-            severity: "info",
-          },
-        ]);
-      }
-
-      if (reportsRes.status === "fulfilled" && Array.isArray(reportsRes.value)) {
-        setReports(reportsRes.value);
-      }
-
-      // Derive journey progress
-      const hasReports =
-        reportsRes.status === "fulfilled" &&
-        Array.isArray(reportsRes.value) &&
-        reportsRes.value.length > 0;
-      const hasInsights =
-        insightsRes.status === "fulfilled" &&
-        Array.isArray(insightsRes.value) &&
-        insightsRes.value.length > 0;
-      const hasScore = scoreRes.status === "fulfilled";
-
-      const isOnboarded =
-        profileRes.status === "fulfilled" &&
-        profileRes.value?.onboarding_completed === true;
-
-      setJourneySteps([
-        { label: "Onboarded", completed: isOnboarded },
-        { label: "First Report", completed: hasReports },
-        { label: "First Insights", completed: hasInsights },
-        { label: "7-Day Streak", completed: false },
-        { label: "Plan Created", completed: false },
-      ]);
-
-      setLoading(false);
-    }
-
-    fetchData();
-  }, [userId]);
+  // Derive journey progress
+  const journeySteps = [
+    { label: "Onboarded", completed: profile?.onboarding_completed === true },
+    { label: "First Report", completed: reports.length > 0 },
+    { label: "First Insights", completed: Array.isArray(insightsRaw) && insightsRaw.length > 0 },
+    { label: "7-Day Streak", completed: false },
+    { label: "Plan Created", completed: false },
+  ];
 
   const primaryInsight = insights[0] || null;
   const additionalInsights = insights.slice(1);

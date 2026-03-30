@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import HealthScore from "@/components/HealthScore";
-import { supabase } from "@/lib/supabase";
-import { apiFetch } from "@/lib/api";
+import { useUserId, useScore, useScoreHistory } from "@/lib/hooks";
 import { formatDate } from "@/lib/utils";
 
 interface CategoryScore {
@@ -91,40 +89,12 @@ const IMPROVEMENT_TIPS: Record<string, string[]> = {
 };
 
 export default function ScorePage() {
-  const [scoreData, setScoreData] = useState<ScoreData | null>(null);
-  const [scoreHistory, setScoreHistory] = useState<ScoreHistory[]>([]);
-  const [loading, setLoading] = useState(true);
+  const userId = useUserId();
+  const { data: scoreData = null, isLoading: scoreLoading } = useScore(userId) as { data: ScoreData | null; isLoading: boolean };
+  const { data: scoreHistoryRaw, isLoading: historyLoading } = useScoreHistory(userId);
 
-  useEffect(() => {
-    async function load() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
-
-      try {
-        const data = await apiFetch<ScoreData>(
-          `/api/score?user_id=${user.id}`
-        );
-        setScoreData(data);
-
-        // Also load score history
-        try {
-          const history = await apiFetch<ScoreHistory[]>(
-            `/api/score/history?user_id=${user.id}&limit=10`
-          );
-          setScoreHistory(Array.isArray(history) ? history : []);
-        } catch {
-          setScoreHistory([]);
-        }
-      } catch {
-        setScoreData(null);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
+  const loading = scoreLoading || historyLoading;
+  const scoreHistory: ScoreHistory[] = Array.isArray(scoreHistoryRaw) ? scoreHistoryRaw : [];
 
   // Deduplicate score history by date (keep latest entry per date)
   const uniqueHistory = scoreHistory.reduce<ScoreHistory[]>((acc, entry) => {

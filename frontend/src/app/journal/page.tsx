@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { supabase } from "@/lib/supabase";
 import { apiFetch } from "@/lib/api";
+import { useInvalidate } from "@/lib/hooks";
 
 const SYMPTOM_OPTIONS = [
   "Fatigue",
@@ -35,6 +36,7 @@ interface JournalEntry {
 }
 
 export default function JournalPage() {
+  const invalidate = useInvalidate();
   const [userId, setUserId] = useState<string | null>(null);
   const [date, setDate] = useState(todayStr());
   const [energy, setEnergy] = useState(0);
@@ -128,6 +130,7 @@ export default function JournalPage() {
         }),
       });
       setSaved(true);
+      invalidate(["symptomLogs"]);
       loadPastEntries(userId);
       setTimeout(() => setSaved(false), 3000);
     } catch (err: any) {
