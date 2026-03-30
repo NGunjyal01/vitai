@@ -97,9 +97,13 @@ export default function ReportsPage() {
           </div>
           <button
             onClick={() => setShowUpload(!showUpload)}
-            className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+            className={`rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm transition focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              showUpload
+                ? "bg-gray-200 text-gray-700 hover:bg-gray-300 focus:ring-gray-400"
+                : "bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-500"
+            }`}
           >
-            {showUpload ? "Cancel" : "Upload Report"}
+            {showUpload ? "Close" : "Upload Report"}
           </button>
         </div>
 

@@ -31,7 +31,16 @@ export default function ReportUpload({ userId, onComplete, onCancel }: ReportUpl
     );
   };
 
-  const resetState = () => {
+  const resetState = async () => {
+    // Delete the failed report from DB so it doesn't appear in the list
+    if (currentReportId.current) {
+      try {
+        await apiFetch(`/api/reports/${currentReportId.current}`, { method: "DELETE" });
+        invalidate(["reports"]);
+      } catch {
+        // Ignore
+      }
+    }
     setUploading(false);
     setError(null);
     setSteps([]);
