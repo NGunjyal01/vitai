@@ -1702,7 +1702,11 @@ def get_normal_range(parameter_key: str, user_profile: dict = None) -> dict:
     profile = user_profile or {}
 
     # Check for fitness-adjusted range
-    is_fitness = profile.get("goal") in ("fitness", "bodybuilding", "athletic", "muscle_building")
+    fitness_values = {"build_muscle", "athletic_performance", "fitness", "bodybuilding", "athletic", "muscle_building"}
+    goals = profile.get("health_goals") or profile.get("health_goal") or profile.get("goal") or []
+    if isinstance(goals, str):
+        goals = [goals]
+    is_fitness = bool(set(goals) & fitness_values)
     has_training = profile.get("training_frequency") or profile.get("is_athlete")
     if is_fitness and has_training and "fitness" in ranges:
         return dict(ranges["fitness"])

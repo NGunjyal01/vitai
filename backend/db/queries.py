@@ -348,7 +348,7 @@ def save_user_profile(user_id: str, profile_data: dict):
     """Upsert a user profile (INSERT ... ON CONFLICT UPDATE)."""
     fields = [
         "full_name", "age", "gender", "height_cm", "weight_kg",
-        "diet_type", "health_goal", "known_conditions", "family_conditions",
+        "diet_type", "health_goals", "known_conditions", "family_conditions",
         "activity_level", "sleep_hours", "stress_level", "training_type",
         "training_frequency", "training_experience", "supplements",
         "goal_phase", "onboarding_completed",
@@ -363,7 +363,7 @@ def save_user_profile(user_id: str, profile_data: dict):
     updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols)
     values = [
         json.dumps(profile_data[c]) if isinstance(profile_data[c], (list, dict))
-        and c not in ("known_conditions", "family_conditions", "supplements")
+        and c not in ("known_conditions", "family_conditions", "supplements", "health_goals")
         else profile_data[c]
         for c in cols
     ]
@@ -522,6 +522,39 @@ def save_symptom_log(user_id: str, energy: int, mood: str,
                 """,
                 (log_id, user_id, today, energy, mood, symptoms, notes),
             )
+
+
+def get_symptom_logs(user_id: str, limit: int = 7):
+    """Return recent symptom logs for a user, newest first."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT logged_date, energy_level, mood, symptoms, notes
+                FROM symptom_logs
+                WHERE user_id = %s
+                ORDER BY logged_date DESC
+                LIMIT %s
+                """,
+                (user_id, limit),
+            )
+            rows = cur.fetchall()
+    return _rows_to_list(rows)
+
+
+def get_plan_completions(user_id: str, plan_id: str):
+    """Return all completed item_keys for a plan."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT item_key FROM plan_completions
+                WHERE user_id = %s AND plan_id = %s
+                """,
+                (user_id, plan_id),
+            )
+            rows = cur.fetchall()
+    return [r["item_key"] for r in rows] if rows else []
 
 
 # ---------------------------------------------------------------------------

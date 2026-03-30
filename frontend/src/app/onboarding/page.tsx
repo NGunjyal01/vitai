@@ -11,9 +11,9 @@ import { apiFetch } from "@/lib/api";
 
 interface Profile {
   full_name: string;
-  age: number;
+  age: string;
   gender: "male" | "female" | "other" | "";
-  health_goal: string;
+  health_goals: string[];
   height_cm: string;
   weight_kg: string;
   diet_type: string;
@@ -37,9 +37,9 @@ interface InsightCard {
 
 const INITIAL_PROFILE: Profile = {
   full_name: "",
-  age: 25,
+  age: "",
   gender: "",
-  health_goal: "",
+  health_goals: [],
   height_cm: "",
   weight_kg: "",
   diet_type: "",
@@ -129,7 +129,7 @@ const FAMILY_HISTORY_OPTIONS = [
   "None/Don't Know",
 ];
 
-const FITNESS_GOALS = ["build_muscle", "athletic_performance"];
+const FITNESS_GOALS: string[] = ["build_muscle", "athletic_performance"];
 
 /* ------------------------------------------------------------------ */
 /*  Helper components                                                  */
@@ -208,9 +208,9 @@ export default function OnboardingPage() {
   const isStepValid = (): boolean => {
     switch (step) {
       case 0:
-        return profile.full_name.trim().length > 0 && profile.age > 0 && profile.gender !== "";
+        return profile.full_name.trim().length > 0 && profile.age !== "" && parseInt(profile.age) > 0 && profile.gender !== "";
       case 1:
-        return profile.health_goal !== "";
+        return profile.health_goals.length > 0;
       case 2:
         return profile.diet_type !== "";
       case 3:
@@ -243,11 +243,18 @@ export default function OnboardingPage() {
         return;
       }
 
+      const payload = {
+        user_id: user.id,
+        ...profile,
+        age: parseInt(profile.age) || 0,
+        health_goal: profile.health_goals[0] || "general_wellness",
+        health_goals: profile.health_goals,
+      };
       const response = await apiFetch<{ insights: InsightCard[] }>(
         "/api/onboarding",
         {
           method: "POST",
-          body: JSON.stringify({ user_id: user.id, ...profile }),
+          body: JSON.stringify(payload),
         }
       );
 
@@ -299,30 +306,19 @@ export default function OnboardingPage() {
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Age
         </label>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => patch({ age: Math.max(1, profile.age - 1) })}
-            className="h-12 w-12 rounded-xl bg-gray-100 text-xl font-bold text-gray-600 hover:bg-gray-200 transition flex items-center justify-center"
-          >
-            -
-          </button>
-          <input
-            type="number"
-            value={profile.age}
-            onChange={(e) =>
-              patch({ age: Math.max(1, parseInt(e.target.value) || 1) })
+        <input
+          type="text"
+          inputMode="numeric"
+          value={profile.age}
+          onChange={(e) => {
+            const val = e.target.value.replace(/[^0-9]/g, "");
+            if (val === "" || (parseInt(val) >= 0 && parseInt(val) <= 120)) {
+              patch({ age: val });
             }
-            className="w-20 text-center rounded-xl border border-gray-200 px-3 py-3 text-gray-900 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition"
-          />
-          <button
-            type="button"
-            onClick={() => patch({ age: Math.min(120, profile.age + 1) })}
-            className="h-12 w-12 rounded-xl bg-gray-100 text-xl font-bold text-gray-600 hover:bg-gray-200 transition flex items-center justify-center"
-          >
-            +
-          </button>
-        </div>
+          }}
+          placeholder="Enter your age"
+          className="w-full rounded-xl border border-gray-200 px-4 py-3 text-gray-900 placeholder-gray-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition"
+        />
       </div>
 
       {/* Gender */}
@@ -353,33 +349,41 @@ export default function OnboardingPage() {
   /* --- Step 2: Health Goal --- */
   const renderHealthGoal = () => (
     <div className="space-y-6">
-      <StepTitle>What&apos;s your primary goal?</StepTitle>
-      <StepSubtitle>We&apos;ll personalize your experience</StepSubtitle>
+      <StepTitle>What are your goals?</StepTitle>
+      <StepSubtitle>Select one or more — we&apos;ll personalize your experience</StepSubtitle>
 
       <div className="grid grid-cols-2 gap-3">
-        {HEALTH_GOALS.map((goal) => (
-          <button
-            key={goal.value}
-            type="button"
-            onClick={() => patch({ health_goal: goal.value })}
-            className={`flex flex-col items-center gap-2 rounded-2xl border-2 p-4 transition ${
-              profile.health_goal === goal.value
-                ? "border-emerald-500 bg-emerald-50 shadow-md"
-                : "border-gray-100 bg-white hover:border-gray-200"
-            }`}
-          >
-            <span className="text-3xl">{goal.icon}</span>
-            <span className="text-sm font-medium text-gray-800 text-center">
-              {goal.label}
-            </span>
-          </button>
-        ))}
+        {HEALTH_GOALS.map((goal) => {
+          const selected = profile.health_goals.includes(goal.value);
+          return (
+            <button
+              key={goal.value}
+              type="button"
+              onClick={() => {
+                const goals = selected
+                  ? profile.health_goals.filter((g) => g !== goal.value)
+                  : [...profile.health_goals, goal.value];
+                patch({ health_goals: goals });
+              }}
+              className={`flex flex-col items-center gap-2 rounded-2xl border-2 p-4 transition ${
+                selected
+                  ? "border-emerald-500 bg-emerald-50 shadow-md"
+                  : "border-gray-100 bg-white hover:border-gray-200"
+              }`}
+            >
+              <span className="text-3xl">{goal.icon}</span>
+              <span className="text-sm font-medium text-gray-800 text-center">
+                {goal.label}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 
   /* --- Step 3: Body & Diet --- */
-  const showFitnessFields = FITNESS_GOALS.includes(profile.health_goal);
+  const showFitnessFields = profile.health_goals.some((g) => FITNESS_GOALS.includes(g));
 
   const renderBodyDiet = () => (
     <div className="space-y-5">
@@ -724,7 +728,7 @@ export default function OnboardingPage() {
       <div className="flex flex-col gap-3 pt-2">
         <button
           type="button"
-          onClick={() => router.push("/dashboard")}
+          onClick={() => router.push("/reports")}
           className="w-full rounded-2xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 hover:bg-emerald-600 active:scale-[0.98] transition"
         >
           Upload a Report
@@ -735,6 +739,13 @@ export default function OnboardingPage() {
           className="w-full rounded-2xl border-2 border-emerald-500 py-3.5 text-sm font-semibold text-emerald-600 hover:bg-emerald-50 active:scale-[0.98] transition"
         >
           Enter Vitals Manually
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push("/dashboard")}
+          className="text-sm font-medium text-gray-400 hover:text-gray-600 transition mt-1"
+        >
+          Skip for now
         </button>
       </div>
     </div>

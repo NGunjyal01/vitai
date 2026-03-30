@@ -72,6 +72,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) {
+        router.push("/login");
+        return;
+      }
       if (data.user) {
         setUser({
           email: data.user.email,
@@ -82,7 +86,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         });
       }
     });
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {

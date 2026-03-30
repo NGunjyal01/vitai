@@ -13,8 +13,9 @@ import { apiFetch } from "@/lib/api";
 import { formatDate, cn } from "@/lib/utils";
 
 interface ScoreData {
-  overall_score: number;
+  total_score: number;
   grade: string;
+  categories_assessed: number;
 }
 
 interface Insight {
@@ -75,10 +76,11 @@ export default function DashboardPage() {
       setLoading(true);
 
       // Fetch all data in parallel, handle failures gracefully
-      const [scoreRes, insightsRes, reportsRes] = await Promise.allSettled([
+      const [scoreRes, insightsRes, reportsRes, profileRes] = await Promise.allSettled([
         apiFetch<ScoreData>(`/api/score?user_id=${userId}`),
         apiFetch<Insight[]>(`/api/insights?user_id=${userId}`),
         apiFetch<Report[]>(`/api/reports?user_id=${userId}`),
+        apiFetch<{ onboarding_completed?: boolean }>(`/api/profile?user_id=${userId}`),
       ]);
 
       if (scoreRes.status === "fulfilled") {
@@ -114,8 +116,12 @@ export default function DashboardPage() {
         insightsRes.value.length > 0;
       const hasScore = scoreRes.status === "fulfilled";
 
+      const isOnboarded =
+        profileRes.status === "fulfilled" &&
+        profileRes.value?.onboarding_completed === true;
+
       setJourneySteps([
-        { label: "Onboarded", completed: true },
+        { label: "Onboarded", completed: isOnboarded },
         { label: "First Insights", completed: hasInsights },
         { label: "First Report", completed: hasReports },
         { label: "7-Day Streak", completed: false },
@@ -139,9 +145,9 @@ export default function DashboardPage() {
 
         {/* Health Score Ring */}
         <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 flex flex-col items-center">
-          {scoreData ? (
+          {scoreData && scoreData.categories_assessed > 0 ? (
             <HealthScore
-              score={scoreData.overall_score}
+              score={scoreData.total_score}
               grade={scoreData.grade}
               size="lg"
             />
