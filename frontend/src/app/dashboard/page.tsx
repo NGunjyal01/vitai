@@ -16,6 +16,7 @@ interface ScoreData {
   total_score: number;
   grade: string;
   categories_assessed: number;
+  total_categories?: number;
 }
 
 interface Insight {
@@ -42,8 +43,8 @@ interface ActionItem {
 
 const journeyStepsDefault = [
   { label: "Onboarded", completed: false },
-  { label: "First Insights", completed: false },
   { label: "First Report", completed: false },
+  { label: "First Insights", completed: false },
   { label: "7-Day Streak", completed: false },
   { label: "Plan Created", completed: false },
 ];
@@ -122,8 +123,8 @@ export default function DashboardPage() {
 
       setJourneySteps([
         { label: "Onboarded", completed: isOnboarded },
-        { label: "First Insights", completed: hasInsights },
         { label: "First Report", completed: hasReports },
+        { label: "First Insights", completed: hasInsights },
         { label: "7-Day Streak", completed: false },
         { label: "Plan Created", completed: false },
       ]);
@@ -145,12 +146,23 @@ export default function DashboardPage() {
 
         {/* Health Score Ring */}
         <section className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 flex flex-col items-center">
-          {scoreData && scoreData.categories_assessed > 0 ? (
-            <HealthScore
-              score={scoreData.total_score}
-              grade={scoreData.grade}
-              size="lg"
-            />
+          {loading ? (
+            <div className="flex flex-col items-center w-full animate-pulse">
+              <div className="w-[200px] h-[200px] rounded-full bg-gray-200 dark:bg-gray-700 mb-4" />
+              <div className="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded mb-2" />
+              <div className="h-3 w-48 bg-gray-200 dark:bg-gray-700 rounded" />
+            </div>
+          ) : scoreData && scoreData.categories_assessed > 0 ? (
+            <>
+              <HealthScore
+                score={scoreData.total_score}
+                grade={scoreData.grade}
+                size="lg"
+              />
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                {scoreData.categories_assessed} of {scoreData.total_categories ?? 11} categories assessed
+              </p>
+            </>
           ) : (
             <div className="flex flex-col items-center py-8 text-center">
               <div className="w-24 h-24 rounded-full border-4 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center mb-4">
@@ -169,6 +181,28 @@ export default function DashboardPage() {
           )}
         </section>
 
+        {/* Loading skeletons for cards */}
+        {loading && (
+          <div className="space-y-6 animate-pulse">
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+              <div className="h-4 w-24 bg-gray-200 dark:bg-gray-700 rounded mb-3" />
+              <div className="h-16 bg-gray-200 dark:bg-gray-700 rounded" />
+            </div>
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+              <div className="h-4 w-32 bg-gray-200 dark:bg-gray-700 rounded mb-3" />
+              <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded" />
+            </div>
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+              <div className="h-4 w-20 bg-gray-200 dark:bg-gray-700 rounded mb-3" />
+              <div className="space-y-2">
+                <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded" />
+                <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!loading && (<>
         {/* Insights Section */}
         <section className="space-y-3">
           <h2 className="text-base font-semibold">Insights</h2>
@@ -321,6 +355,7 @@ export default function DashboardPage() {
           <h2 className="text-base font-semibold mb-2">Your Journey</h2>
           <JourneyProgress steps={journeySteps} />
         </section>
+        </>)}
       </div>
     </AppShell>
   );

@@ -60,6 +60,25 @@ export default function JournalPage() {
     init();
   }, []);
 
+  // Pre-fill form when date changes and an existing entry exists for that date
+  useEffect(() => {
+    const existing = pastEntries.find((e) => e.logged_date === date);
+    if (existing) {
+      setEnergy(existing.energy_level || 0);
+      setMood(typeof existing.mood === "string" ? parseInt(existing.mood) || 0 : existing.mood || 0);
+      setSymptoms(existing.symptoms || []);
+      setNotes(existing.notes || "");
+      setSaved(false);
+    } else {
+      // Reset form for a new date
+      setEnergy(0);
+      setMood(0);
+      setSymptoms([]);
+      setNotes("");
+      setSaved(false);
+    }
+  }, [date, pastEntries]);
+
   const loadPastEntries = async (uid: string) => {
     setLoadingEntries(true);
     try {
@@ -87,8 +106,11 @@ export default function JournalPage() {
     });
   };
 
+  const canSave = energy > 0 && mood > 0;
+  const isEditing = pastEntries.some((e) => e.logged_date === date);
+
   const handleSave = async () => {
-    if (!userId) return;
+    if (!userId || !canSave) return;
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -102,6 +124,7 @@ export default function JournalPage() {
           mood: mood,
           symptoms,
           notes,
+          logged_date: date,
         }),
       });
       setSaved(true);
@@ -264,8 +287,8 @@ export default function JournalPage() {
           {/* Save */}
           <button
             onClick={handleSave}
-            disabled={saving}
-            className="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-medium text-sm transition-colors flex items-center justify-center gap-2"
+            disabled={saving || !canSave}
+            className="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium text-sm transition-colors flex items-center justify-center gap-2"
           >
             {saving ? (
               <>
@@ -291,9 +314,19 @@ export default function JournalPage() {
                 Saving...
               </>
             ) : (
-              "Save Entry"
+              isEditing ? "Update Entry" : "Save Entry"
             )}
           </button>
+          {!canSave && (
+            <p className="text-xs text-gray-400 text-center mt-1">
+              Select energy and mood to save
+            </p>
+          )}
+          {isEditing && canSave && (
+            <p className="text-xs text-amber-500 text-center mt-1">
+              Editing existing entry for this date
+            </p>
+          )}
         </div>
 
         {/* Past 7 Days Timeline */}

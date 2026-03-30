@@ -128,7 +128,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex md:flex-col md:w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 fixed inset-y-0 left-0 z-30">
         {/* Logo */}
-        <div className="flex items-center gap-2 px-6 py-5 border-b border-gray-200 dark:border-gray-800">
+        <div className="flex items-center gap-2 px-6 h-14 border-b border-gray-200 dark:border-gray-800">
           <div className="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center">
             <Activity className="w-5 h-5 text-white" />
           </div>

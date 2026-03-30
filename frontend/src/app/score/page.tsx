@@ -126,6 +126,27 @@ export default function ScorePage() {
     load();
   }, []);
 
+  // Deduplicate score history by date (keep latest entry per date)
+  const uniqueHistory = scoreHistory.reduce<ScoreHistory[]>((acc, entry) => {
+    const date = entry.calculated_at.split("T")[0];
+    const existing = acc.find((e) => e.calculated_at.split("T")[0] === date);
+    if (!existing) acc.push(entry);
+    return acc;
+  }, []);
+  const showHistory = uniqueHistory.length >= 2;
+
+  // Sort categories: assessed first (by score ascending), then unassessed
+  const sortedCategories = scoreData
+    ? Object.entries(scoreData.category_scores).sort((a, b) => {
+        const aAssessed = a[1].assessed && a[1].score !== null;
+        const bAssessed = b[1].assessed && b[1].score !== null;
+        if (aAssessed && !bAssessed) return -1;
+        if (!aAssessed && bAssessed) return 1;
+        if (aAssessed && bAssessed) return (a[1].score ?? 0) - (b[1].score ?? 0);
+        return 0;
+      })
+    : [];
+
   // Find the lowest-scored assessed categories for tips
   const lowestCategories = scoreData
     ? Object.entries(scoreData.category_scores)
@@ -155,6 +176,9 @@ export default function ScorePage() {
 
         {!loading && scoreData && (
           <>
+            {/* Health Score Header */}
+            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Health Score</h1>
+
             {/* Score Ring */}
             <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 flex flex-col items-center">
               <HealthScore
@@ -162,7 +186,7 @@ export default function ScorePage() {
                 grade={scoreData.grade}
                 size="lg"
               />
-              <div className="mt-4 flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-sm text-gray-500 dark:text-gray-400">
                 <span>
                   Base: <strong className="text-gray-700 dark:text-gray-300">{scoreData.base_score}</strong>
                 </span>
@@ -191,15 +215,24 @@ export default function ScorePage() {
               <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
                 Category Breakdown
               </h3>
-              <div className="space-y-3">
-                {Object.entries(scoreData.category_scores).map(
-                  ([key, cat]) => (
-                    <div key={key} className="flex items-center gap-3">
+              <div className="space-y-2">
+                {sortedCategories.map(
+                  ([key, cat]) => {
+                    const scoreBg =
+                      cat.assessed && cat.score !== null
+                        ? cat.score >= 80
+                          ? "bg-green-50 dark:bg-green-900/10"
+                          : cat.score >= 60
+                          ? "bg-amber-50 dark:bg-amber-900/10"
+                          : "bg-red-50 dark:bg-red-900/10"
+                        : "";
+                    return (
+                    <div key={key} className={`flex items-center gap-3 rounded-lg px-3 py-2 ${scoreBg}`}>
                       <div
                         className="w-3 h-3 rounded-full flex-shrink-0"
                         style={{ backgroundColor: cat.color }}
                       />
-                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 w-40 flex-shrink-0">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300 w-28 sm:w-40 flex-shrink-0 truncate">
                         {cat.label}
                       </span>
                       {cat.assessed && cat.score !== null ? (
@@ -213,8 +246,8 @@ export default function ScorePage() {
                               }}
                             />
                           </div>
-                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 w-10 text-right">
-                            {cat.score}
+                          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 w-16 text-right">
+                            {cat.score}/100
                           </span>
                         </div>
                       ) : (
@@ -223,19 +256,20 @@ export default function ScorePage() {
                         </span>
                       )}
                     </div>
-                  )
+                    );
+                  }
                 )}
               </div>
             </div>
 
             {/* Score History */}
-            {scoreHistory.length > 1 && (
+            {showHistory && (
               <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5">
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
                   Score History
                 </h3>
                 <div className="flex items-end gap-2 h-32">
-                  {scoreHistory
+                  {uniqueHistory
                     .slice()
                     .reverse()
                     .map((entry, idx) => {
